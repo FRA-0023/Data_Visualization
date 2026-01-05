@@ -1,0 +1,2219 @@
+---
+title: "Eurostat"
+author: "fra"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## ETL
+
+```{r ETL}
+rm(list = ls())
+library(eurostat)
+library(dplyr)
+library(tidyr)
+
+#read the data and wide it
+df <- get_eurostat("ext_ser_bec01", keepFlags = FALSE, time_format = "date")
+df_wide <- df %>%
+  mutate(year = format(TIME_PERIOD, "%Y")) %>% 
+  select(-TIME_PERIOD) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = values
+  )
+
+
+# Countries' MAP
+country_map <- c(
+  'AT' = 'Austria',
+  'BE' = 'Belgium',
+  'BG' = 'Bulgaria',
+  'CH' = 'Switzerland',
+  'CY' = 'Cyprus',
+  'CZ' = 'Czech Republic',
+  'DE' = 'Germany',
+  'DK' = 'Denmark',
+  'EE' = 'Estonia',
+  'EL' = 'Greece',
+  'ES' = 'Spain',
+  'FI' = 'Finland',
+  'FR' = 'France',
+  'HR' = 'Croatia',
+  'HU' = 'Hungary',
+  'IE' = 'Ireland',
+  'IS' = 'Iceland',
+  'IT' = 'Italy',
+  'LT' = 'Lithuania',
+  'LU' = 'Luxembourg',
+  'LV' = 'Latvia',
+  'MT' = 'Malta',
+  'NL' = 'Netherlands',
+  'NO' = 'Norway',
+  'PL' = 'Poland',
+  'PT' = 'Portugal',
+  'RO' = 'Romania',
+  'SE' = 'Sweden',
+  'SI' = 'Slovenia',
+  'SK' = 'Slovakia',
+  'UK' = 'United Kingdom'
+)
+
+# Sectors' Map
+mapping_en <- c(
+  "BEC_SERV" = "Services",
+  "BEC_SERV_IC" = "Services intermediate",
+  "BEC_SERV_FC" = "Services final",
+  "BEC121" = "Agriculture intermediate",
+  "BEC123" = "Agriculture final",
+  "BEC221" = "Mining & energy intermediate",
+  "BEC223" = "Mining & energy final",
+  "BEC321" = "Construction intermediate",
+  "BEC323" = "Construction final",
+  "BEC421" = "Textile & footwear intermediate",
+  "BEC521" = "Transport & logistics intermediate",
+  "BEC523" = "Transport & logistics final",
+  "BEC621" = "ICT & financial services intermediate",
+  "BEC623" = "ICT & financial services final",
+  "BEC721" = "Health, education & culture intermediate",
+  "BEC723" = "Health, education & culture final",
+  "BEC821" = "Public administration intermediate"
+)
+
+# Partners' Map
+mapping_partner <- c(
+  "EXT_EU27_2020" = "UE2020",
+  "WRL_REST" = "Rest_of_the_World"
+)
+
+#mapping the values
+df_wide$geo <- recode(df_wide$geo, !!!country_map)
+df_wide$bec_r5 <- recode(df_wide$bec_r5, !!!mapping_en)
+df_wide$partner <- recode(df_wide$partner, !!!mapping_partner)
+
+
+df_wide <- df_wide %>%
+  select(-unit, -freq) %>%
+  rename(
+    State = geo, 
+    Sector = bec_r5
+  )
+
+#View(df_wide)
+
+# Format number
+format_number <- function(x) {
+  format(x, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+}
+
+# General sectors mapping
+map_sectors <- function(sector) {
+  case_when(
+    grepl("Agriculture", sector) ~ "Agriculture",
+    grepl("Mining & energy", sector) ~ "Mining & Energy",
+    grepl("Construction", sector) ~ "Construction",
+    grepl("Textile & footwear", sector) ~ "Textile & Footwear",
+    grepl("Transport & logistics", sector) ~ "Transport & Logistics",
+    grepl("ICT & financial", sector) ~ "ICT & Financial Services",
+    grepl("Health, education & culture", sector) ~ "Health, Education & Culture",
+    grepl("Public administration", sector) ~ "Public Administration",
+    grepl("Services", sector) ~ "Services",
+    TRUE ~ "Other"
+  )
+}
+
+summary(df_wide)
+
+```
+
+```{r}
+# ============================================================================
+# EXPLORATORY DATA ANALYSIS - INTERNATIONAL TRADE DATASET
+# ============================================================================
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+print("=== EXPLORATORY DATA ANALYSIS ===")
+print("")
+
+# ============================================================================
+# 1. BASIC DATASET STRUCTURE
+# ============================================================================
+print("1. DATASET STRUCTURE")
+print("-------------------")
+print(paste("Dimensions:", nrow(df_wide), "rows x", ncol(df_wide), "columns"))
+print(paste("Columns:", paste(colnames(df_wide), collapse=", ")))
+print("")
+
+print("Data types:")
+print(sapply(df_wide, class))
+print("")
+
+print("First few rows:")
+print(head(df_wide, 3))
+print("")
+
+# ============================================================================
+# 2. MISSING VALUES ANALYSIS
+# ============================================================================
+print("2. MISSING VALUES")
+print("------------------")
+missing_summary <- data.frame(
+  Column = colnames(df_wide),
+  Missing_Count = colSums(is.na(df_wide)),
+  Missing_Percentage = round(colSums(is.na(df_wide)) / nrow(df_wide) * 100, 2)
+)
+print(missing_summary[missing_summary$Missing_Count > 0, ])
+print("")
+
+# ============================================================================
+# 3. CATEGORICAL VARIABLES ANALYSIS
+# ============================================================================
+print("3. CATEGORICAL VARIABLES")
+print("-------------------------")
+
+if("Sector" %in% colnames(df_wide)) {
+  print(paste("Sectors (unique count):", length(unique(df_wide$Sector))))
+  sector_counts <- table(df_wide$Sector)
+  print("Top 5 sectors by frequency:")
+  print(head(sort(sector_counts, decreasing = TRUE), 5))
+}
+
+if("partner" %in% colnames(df_wide)) {
+  print("Partners:")
+  print(table(df_wide$partner))
+}
+
+if("stk_flow" %in% colnames(df_wide)) {
+  print("Trade Flow Types:")
+  print(table(df_wide$stk_flow))
+}
+
+if("State" %in% colnames(df_wide)) {
+  print(paste("States/Countries (unique count):", length(unique(df_wide$State))))
+  print(paste("Sample countries:", paste(head(unique(df_wide$State), 10), collapse=", ")))
+}
+print("")
+
+# ============================================================================
+# 4. TEMPORAL ANALYSIS (assuming year columns exist)
+# ============================================================================
+print("4. TEMPORAL COVERAGE")
+print("---------------------")
+
+# Identify year columns
+year_cols <- grep("^[0-9]{4}$", colnames(df_wide), value = TRUE)
+if(length(year_cols) > 0) {
+  print(paste("Year range:", min(year_cols), "-", max(year_cols)))
+  print(paste("Number of years:", length(year_cols)))
+  print("")
+  
+  # Calculate total trade per year
+  yearly_totals <- sapply(year_cols, function(year) {
+    sum(as.numeric(df_wide[[year]]), na.rm = TRUE)
+  })
+  
+  print("Total trade volume by year:")
+  yearly_df_wide <- data.frame(
+    Year = year_cols,
+    Total_Volume = yearly_totals,
+    Formatted = format(yearly_totals, big.mark = ",", scientific = FALSE)
+  )
+  print(yearly_df_wide[, c("Year", "Formatted")])
+  
+  print(paste("Growth from first to last year:", 
+      round((yearly_totals[length(yearly_totals)] / yearly_totals[1] - 1) * 100, 1), "%"))
+}
+print("")
+
+# ============================================================================
+# 5. TRADE VALUES ANALYSIS
+# ============================================================================
+print("5. TRADE VALUES STATISTICS")
+print("---------------------------")
+
+if(length(year_cols) > 0) {
+  # Get all numeric trade values
+  all_values <- unlist(df_wide[, year_cols])
+  all_values <- as.numeric(all_values[!is.na(all_values)])
+  all_values <- all_values[all_values > 0]  # Remove zeros
+  
+  print("Overall Statistics (across all years):")
+  print(paste("  Minimum:", format(min(all_values), big.mark = ","), "EUR"))
+  print(paste("  Maximum:", format(max(all_values), big.mark = ","), "EUR"))
+  print(paste("  Mean:", format(mean(all_values), big.mark = ","), "EUR"))
+  print(paste("  Median:", format(median(all_values), big.mark = ","), "EUR"))
+  print(paste("  Std Dev:", format(sd(all_values), big.mark = ","), "EUR"))
+  
+  print("Percentiles:")
+  percentiles <- quantile(all_values, probs = c(0.25, 0.5, 0.75, 0.90, 0.95, 0.99))
+  for(i in 1:length(percentiles)) {
+    print(paste("  ", names(percentiles)[i], ": ", 
+        format(percentiles[i], big.mark = ","), " EUR", sep = ""))
+  }
+}
+print("")
+
+# ============================================================================
+# 6. EXPORT vs IMPORT ANALYSIS
+# ============================================================================
+print("6. EXPORT vs IMPORT COMPARISON")
+print("-------------------------------")
+
+if("stk_flow" %in% colnames(df_wide) && length(year_cols) > 0) {
+  exp_data <- df_wide %>% filter(stk_flow == "EXP")
+  imp_data <- df_wide %>% filter(stk_flow == "IMP")
+  
+  total_exp <- sum(as.numeric(unlist(exp_data[, year_cols])), na.rm = TRUE)
+  total_imp <- sum(as.numeric(unlist(imp_data[, year_cols])), na.rm = TRUE)
+  
+  print(paste("Total Exports:", format(total_exp, big.mark = ","), "EUR"))
+  print(paste("Total Imports:", format(total_imp, big.mark = ","), "EUR"))
+  print(paste("Trade Balance:", format(total_exp - total_imp, big.mark = ","), "EUR"))
+  print(paste("Export/Import Ratio:", round(total_exp / total_imp, 3)))
+}
+print("")
+
+# ============================================================================
+# 7. PARTNER ANALYSIS
+# ============================================================================
+print("7. TRADE BY PARTNER")
+print("--------------------")
+
+if("partner" %in% colnames(df_wide) && length(year_cols) > 0) {
+  partner_totals <- df_wide %>%
+    group_by(partner) %>%
+    summarise(
+      Total_Trade = sum(across(all_of(year_cols), ~sum(as.numeric(.), na.rm = TRUE))),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(Total_Trade))
+  
+  partner_totals$Formatted <- format(partner_totals$Total_Trade, big.mark = ",")
+  
+  print("Trade volume by partner:")
+  print(partner_totals[, c("partner", "Formatted")])
+  
+  print("Partner share:")
+  partner_totals$Share <- round(partner_totals$Total_Trade / sum(partner_totals$Total_Trade) * 100, 1)
+  print(partner_totals[, c("partner", "Share")])
+}
+print("")
+
+# ============================================================================
+# 8. TOP COUNTRIES ANALYSIS
+# ============================================================================
+print("8. TOP TRADING COUNTRIES")
+print("-------------------------")
+
+if("State" %in% colnames(df_wide) && length(year_cols) > 0) {
+  country_totals <- df_wide %>%
+    group_by(State) %>%
+    summarise(
+      Total_Trade = sum(across(all_of(year_cols), ~sum(as.numeric(.), na.rm = TRUE))),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(Total_Trade)) %>%
+    head(10)
+  
+  country_totals$Formatted <- format(country_totals$Total_Trade, big.mark = ",")
+  
+  print("Top 10 countries by total trade volume:")
+  print(country_totals[, c("State", "Formatted")])
+}
+print("")
+
+# ============================================================================
+# 9. SECTOR ANALYSIS
+# ============================================================================
+print("9. TOP SECTORS")
+print("---------------")
+
+if("Sector" %in% colnames(df_wide) && length(year_cols) > 0) {
+  sector_totals <- df_wide %>%
+    group_by(Sector) %>%
+    summarise(
+      Total_Trade = sum(across(all_of(year_cols), ~sum(as.numeric(.), na.rm = TRUE))),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(Total_Trade)) %>%
+    head(10)
+  
+  sector_totals$Formatted <- format(sector_totals$Total_Trade, big.mark = ",")
+  
+  print("Top 10 sectors by total trade volume:")
+  print(sector_totals[, c("Sector", "Formatted")])
+}
+print("")
+
+# ============================================================================
+# 10. OUTLIER DETECTION
+# ============================================================================
+print("10. OUTLIER DETECTION")
+print("----------------------")
+
+if(length(year_cols) > 0 && exists("all_values")) {
+  # Using IQR method
+  Q1 <- quantile(all_values, 0.25)
+  Q3 <- quantile(all_values, 0.75)
+  IQR_val <- Q3 - Q1
+  
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  
+  outliers <- all_values[all_values > upper_bound]
+  
+  print("IQR Method:")
+  print(paste("  Lower bound:", format(lower_bound, big.mark = ","), "EUR"))
+  print(paste("  Upper bound:", format(upper_bound, big.mark = ","), "EUR"))
+  print(paste("  Number of outliers (high values):", length(outliers)))
+  print(paste("  Percentage of outliers:", round(length(outliers) / length(all_values) * 100, 2), "%"))
+  
+  if(length(outliers) > 0) {
+    print("  Top 5 outlier values:")
+    top_outliers <- head(sort(outliers, decreasing = TRUE), 5)
+    for(i in 1:length(top_outliers)) {
+      print(paste("    ", i, ": ", format(top_outliers[i], big.mark = ","), " EUR", sep = ""))
+    }
+  }
+}
+print("")
+
+# ============================================================================
+# 11. VOLATILITY/STABILITY ANALYSIS
+# ============================================================================
+print("11. TRADE VOLATILITY")
+print("---------------------")
+
+if("State" %in% colnames(df_wide) && length(year_cols) > 0) {
+  # Calculate coefficient of variation for each country
+  country_cv <- df_wide %>%
+    group_by(State) %>%
+    summarise(
+      Mean_Trade = mean(across(all_of(year_cols), ~sum(as.numeric(.), na.rm = TRUE))),
+      SD_Trade = sd(across(all_of(year_cols), ~sum(as.numeric(.), na.rm = TRUE))),
+      .groups = "drop"
+    ) %>%
+    mutate(CV = SD_Trade / Mean_Trade) %>%
+    filter(!is.na(CV) & !is.infinite(CV)) %>%
+    arrange(desc(CV))
+  
+  print("Most volatile countries (highest coefficient of variation):")
+  print(head(country_cv[, c("State", "CV")], 5))
+  
+  print("Most stable countries (lowest coefficient of variation):")
+  print(tail(country_cv[, c("State", "CV")], 5))
+}
+print("")
+
+print("=== END OF EXPLORATORY DATA ANALYSIS ===")
+```
+
+# Analysis
+
+```{r yearly_trade_summary, echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+yearly_trade_summary <- df_wide %>%
+  pivot_longer(
+    cols = matches("^[0-9]{4}$"),
+    names_to = "year",
+    values_to = "yearly_value"
+  ) %>%
+  group_by(partner, year, stk_flow) %>%
+  summarise(
+    total_yearly_value = sum(yearly_value, na.rm = TRUE),
+    num_transactions = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = stk_flow, 
+    values_from = c(total_yearly_value, num_transactions),
+    values_fill = 0
+  ) %>%
+  mutate(
+    net_trade_balance = total_yearly_value_EXP - total_yearly_value_IMP,
+    total_trade_volume = total_yearly_value_EXP + total_yearly_value_IMP,
+    export_import_ratio = total_yearly_value_EXP / total_yearly_value_IMP
+  ) %>%
+  arrange((partner), (year))
+
+# calculate % change between 2013 and 2024
+calculate_pct_change <- function(df, value_column) {
+  df %>%
+    group_by(partner) %>%
+    summarise(
+      first_value = first(!!sym(value_column)),
+      last_value = last(!!sym(value_column)),
+      last_year = last(year),
+      pct_change = ((last_value - first_value) / first_value) * 100,
+      label = paste0(ifelse(pct_change >= 0, "+", ""), round(pct_change, 1), "%")
+    )
+}
+
+#Calculate changes for each metrics
+pct_change_export <- calculate_pct_change(yearly_trade_summary, "total_yearly_value_EXP")
+pct_change_import <- calculate_pct_change(yearly_trade_summary, "total_yearly_value_IMP")
+pct_change_ratio <- calculate_pct_change(yearly_trade_summary, "export_import_ratio")
+
+# Joins of the data
+export_data <- yearly_trade_summary %>%
+  left_join(pct_change_export, by = "partner")
+
+import_data <- yearly_trade_summary %>%
+  left_join(pct_change_import, by = "partner")
+
+ratio_data <- yearly_trade_summary %>%
+  left_join(pct_change_ratio, by = "partner")
+
+# Trillion format
+format_trillion <- function(x) {
+  paste0(round(x / 1e6, 1), " T")
+}
+
+# Colors palette: BLUE for Export, Green for Import
+custom_colors_export <- c(
+  "UE2020" = "#1E90FF",           
+  "Rest_of_the_World" = "#0047AB"
+)
+
+custom_colors_import <- c(
+  "UE2020" = "#7FF777",          
+  "Rest_of_the_World" = "#2E8B57"
+)
+
+# Personalized theme
+theme_custom <- theme_minimal() +
+  theme(
+    text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.text = element_text(size = 12),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold", size = 13),
+    legend.text = element_text(size = 12),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+
+# Tags for Export
+pct_change_export_positioned <- pct_change_export %>% 
+  left_join(yearly_trade_summary %>% 
+              group_by(partner) %>% 
+              slice_tail(n = 1) %>% 
+              select(partner, year, total_yearly_value_EXP), 
+            by = "partner") %>%
+  mutate(
+    label_y = case_when(
+      total_yearly_value_EXP == max(total_yearly_value_EXP) ~ total_yearly_value_EXP * 1.05,
+      TRUE ~ total_yearly_value_EXP * 0.95
+    )
+  )
+
+# Tags for Import
+pct_change_import_positioned <- pct_change_import %>% 
+  left_join(yearly_trade_summary %>% 
+              group_by(partner) %>% 
+              slice_tail(n = 1) %>% 
+              select(partner, year, total_yearly_value_IMP), 
+            by = "partner") %>%
+  mutate(
+    label_y = case_when(
+      total_yearly_value_IMP == max(total_yearly_value_IMP) ~ total_yearly_value_IMP * 1.05,
+      TRUE ~ total_yearly_value_IMP * 0.95
+    )
+  )
+
+# Tags fot the ratio
+pct_change_ratio_positioned <- pct_change_ratio %>% 
+  left_join(yearly_trade_summary %>% 
+              group_by(partner) %>% 
+              slice_tail(n = 1) %>% 
+              select(partner, year, export_import_ratio), 
+            by = "partner") %>%
+  mutate(
+    label_y = case_when(
+      export_import_ratio == max(export_import_ratio) ~ export_import_ratio * 1.05,
+      TRUE ~ export_import_ratio * 0.95
+    )
+  )
+
+# Export plot
+ex <- ggplot(export_data, aes(x = year, y = total_yearly_value_EXP, color = partner, group = partner)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text(
+    data = pct_change_export_positioned,
+    aes(x = year, y = label_y, label = label),
+    size = 4,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(
+    labels = format_trillion,
+    expand = expansion(mult = c(0.05, 0.2))
+  ) +
+  scale_color_manual(values = custom_colors_export) +
+  labs(
+    title = "Total Yearly Export Value",
+    x = "Year", 
+    y = "Export Value (Trillion EUR)",
+    color = "Partner"
+  ) +
+  theme_custom
+
+# Import plot
+im <- ggplot(import_data, aes(x = year, y = total_yearly_value_IMP, color = partner, group = partner)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text(
+    data = pct_change_import_positioned,
+    aes(x = year, y = label_y, label = label),
+    size = 4,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(
+    labels = format_trillion,
+    expand = expansion(mult = c(0.05, 0.2))
+  ) +
+  scale_color_manual(values = custom_colors_import) +
+  labs(
+    title = "Total Yearly Import Value",
+    x = "Year", 
+    y = "Import Value (Trillion EUR)",
+    color = "Partner"
+  ) +
+  theme_custom
+
+# ratio plot
+ratio <- ggplot(ratio_data, aes(x = year, y = export_import_ratio, color = partner, group = partner)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text(
+    data = pct_change_ratio_positioned,
+    aes(x = year, y = label_y, label = label),
+    size = 4,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(
+    labels = format_number,
+    expand = expansion(mult = c(0.05, 0.2))
+  ) +
+  scale_color_manual(values = custom_colors_export) +
+  labs(
+    title = "Export/Import Ratio",
+    x = "Year", 
+    y = "Export/Import Ratio",
+    color = "Partner"
+  ) +
+  theme_custom
+
+# Calcolate correlations
+correlation_export_import <- cor(
+  yearly_trade_summary$total_yearly_value_EXP, 
+  yearly_trade_summary$total_yearly_value_IMP, 
+  use = "complete.obs"
+)
+
+correlation_ue <- yearly_trade_summary %>%
+  filter(partner == "UE2020") %>%
+  summarise(
+    correlazione_export_import_ue = cor(
+      total_yearly_value_EXP, 
+      total_yearly_value_IMP, 
+      use = "complete.obs"
+    )
+  )
+
+correlation_extra_ue <- yearly_trade_summary %>%
+  filter(partner == "Rest_of_the_World") %>%
+  summarise(
+    correlazione_export_import_extra_ue = cor(
+      total_yearly_value_EXP, 
+      total_yearly_value_IMP, 
+      use = "complete.obs"
+    )
+  )
+
+results_correlation <- data.frame(
+  Area = c("Export-Import", "Rest of the World", "UE2020"),
+  Correlation = c(
+    correlation_export_import,
+    correlation_extra_ue$correlazione_export_import_extra_ue,
+    correlation_ue$correlazione_export_import_ue
+  )) %>%
+  mutate(
+    R_squared = Correlation^2
+  )
+
+print(results_correlation)
+
+# Visualizzazione dei grafici
+print(im)
+print(ex)
+print(ratio)
+
+
+# Salvataggio dei grafici a 200 DPI
+ggsave("export_yearly_value.jpg", im, width = 7, height = 4, dpi = 300)
+ggsave("import_yearly_value.jpg", ex, width = 7, height = 4, dpi = 300)
+ggsave("export_import_ratio.jpg", ratio, width = 12, height = 7, dpi = 300)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# --- 1. Data preparation ---
+
+yearly_trade_summary <- df_wide %>%
+  pivot_longer(
+    cols = matches("^[0-9]{4}$"),
+    names_to = "year",
+    values_to = "yearly_value"
+  ) %>%
+  group_by(partner, year, stk_flow) %>%
+  summarise(
+    total_yearly_value = sum(yearly_value, na.rm = TRUE),
+    num_transactions = n(),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = stk_flow, 
+    values_from = c(total_yearly_value, num_transactions),
+    values_fill = 0
+  ) %>%
+  mutate(
+    net_trade_balance = total_yearly_value_EXP - total_yearly_value_IMP,
+    total_trade_volume = total_yearly_value_EXP + total_yearly_value_IMP,
+    export_import_ratio = total_yearly_value_EXP / total_yearly_value_IMP
+  ) %>%
+  mutate(year = as.numeric(year)) %>%
+  arrange(partner, year) %>%
+  mutate(partner = factor(partner, levels = c("UE2020", "Rest_of_the_World")))
+
+
+# --- 2. Barplot function ---
+
+target_years <- c(2013, 2024)
+prepare_barplot_data <- function(df, value_col) {
+  # 1. % change
+  stats <- df %>%
+    filter(year %in% target_years) %>%
+    group_by(partner) %>%
+    arrange(year) %>%
+    summarise(
+      val_2013 = first(!!sym(value_col)),
+      val_2024 = last(!!sym(value_col)),
+      max_val = max(!!sym(value_col)),
+      pct_change = ((val_2024 - val_2013) / val_2013) * 100,
+      label_pct = paste0(ifelse(pct_change >= 0, "+", ""), round(pct_change, 1), "%"),
+      .groups = "drop"
+    )
+  
+  # 2. filter
+  plot_data <- df %>%
+    filter(year %in% target_years) %>%
+    select(partner, year, all_of(value_col)) %>%
+    rename(value = !!sym(value_col)) %>%
+    mutate(year = as.factor(year))
+  
+  list(data = plot_data, stats = stats)
+}
+
+# --- 3. preparing the plots ---
+
+data_export <- prepare_barplot_data(yearly_trade_summary, "total_yearly_value_EXP")
+data_import <- prepare_barplot_data(yearly_trade_summary, "total_yearly_value_IMP")
+
+# --- 4. Common scale ---
+global_max_value <- max(c(data_export$data$value, data_import$data$value), na.rm = TRUE)
+common_y_limit <- c(0, global_max_value * 1.25)
+
+# --- 5. Colors & plot formatting ---
+
+format_trillion_short <- function(x) paste0(round(x / 1e6, 2), "T")
+format_number_short <- function(x) format(round(x, 2), decimal.mark = ",")
+
+colors_export <- c("UE2020" = "#1E90FF", "Rest_of_the_World" = "#0047AB")
+colors_import <- c("UE2020" = "#F7B9F9", "Rest_of_the_World" = "#FA52FF")
+
+theme_custom <- theme_minimal() +
+  theme(
+    text = element_text(size = 14, color = "black"),
+    plot.title = element_text(face = "bold", hjust = 0.5, 
+                              size = 16, color = "black"),
+    axis.text = element_text(size = 12, color = "black"), 
+    axis.title = element_text(face = "bold", color = "black"),
+    legend.text = element_text(color = "black"),
+    legend.title = element_text(color = "black"),
+    strip.text = element_text(face = "bold", size = 13, color = "black"),
+    panel.grid.major.x = element_blank()
+  )
+
+
+# --- 6. create the function plots ---
+create_barplot <- function(data_list, title, y_lab, fill_colors, formatter, manual_limits = NULL) {
+  
+  df_bars <- data_list$data
+  df_stats <- data_list$stats
+  
+  p <- ggplot(df_bars, aes(x = as.factor(year), y = value, fill = partner)) +
+    geom_col(
+      aes(alpha = as.factor(year)), 
+      width = 0.6, 
+      color = "black",
+      linewidth = 0.2, 
+      show.legend = FALSE
+    ) +
+    facet_wrap(~ partner, nrow = 1, strip.position = "bottom") +
+    geom_text(
+      aes(label = formatter(value)),
+      vjust = -0.5,
+      size = 3.5,
+      fontface = "bold",
+      color = "black"
+    ) +
+    geom_text(
+      data = df_stats,
+      aes(x = 1.5, y = max_val, label = label_pct),
+      inherit.aes = FALSE,
+      vjust = -2,
+      size = 5,
+      fontface = "bold",
+      color = "black"
+    ) +
+    scale_fill_manual(values = fill_colors) +
+    scale_alpha_manual(values = c("2013" = 0.6, "2024" = 1)) +
+    labs(
+      title = title,
+      x = NULL,
+      y = y_lab
+    ) +
+    theme_custom +
+    theme(
+      strip.placement = "outside",         
+      strip.background = element_blank(),  
+      strip.text = element_text(face = "bold", size = 13), 
+      axis.text.x = element_text(face = "bold", color = "black"),
+      panel.spacing = unit(0.5, "cm")        
+    )
+
+  if (!is.null(manual_limits)) {
+    p <- p + scale_y_continuous(labels = formatter, limits = manual_limits, expand = expansion(mult = 0))
+  } else {
+    p <- p + scale_y_continuous(labels = formatter, expand = expansion(mult = c(0, 0.2)))
+  }
+  
+  return(p)
+}
+
+# --- 7. plot the plots ---
+p10 <- create_barplot(
+  data_export, 
+  title = "Export Value: 2013 vs 2024", 
+  y_lab = "Export (Trillion EUR)", 
+  fill_colors = colors_export,
+  formatter = format_trillion_short,
+  manual_limits = common_y_limit
+)
+
+p20 <- create_barplot(
+  data_import, 
+  title = "Import Value: 2013 vs 2024", 
+  y_lab = "Import (Trillion EUR)", 
+  fill_colors = colors_import,
+  formatter = format_trillion_short,
+  manual_limits = common_y_limit
+)
+
+print(p10)
+print(p20)
+
+ggsave("barplot_export_13_24.jpg", p10, width = 5, height = 5, dpi = 300)
+ggsave("barplot_import_13_24.jpg", p20, width = 5, height = 5, dpi = 300)
+```
+
+```{r}
+# data preparation
+sector_trade_summary <- df_wide %>%
+  pivot_longer( #long format
+    cols = matches("^[0-9]{4}$"),
+    names_to = "year",
+    values_to = "yearly_value"
+  ) %>%
+  mutate(
+    general_sector = map_sectors(Sector)
+  ) %>%
+  group_by(partner, year, general_sector, stk_flow) %>%
+  summarise(
+    total_yearly_value = sum(yearly_value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = stk_flow, 
+    values_from = total_yearly_value,
+    values_fill = 0,
+    names_prefix = "total_yearly_"
+  )
+
+# only 2024 values
+last_year_sector <- sector_trade_summary %>%
+  filter(year == "2024") %>%
+  mutate(total_trade = abs(total_yearly_EXP) + abs(total_yearly_IMP)) %>%
+  arrange(desc(total_trade))
+
+# only 2013 values
+first_year_sector <- sector_trade_summary %>%
+  filter(year == "2013") %>%
+  mutate(total_trade = abs(total_yearly_EXP) + abs(total_yearly_IMP)) %>%
+  arrange(desc(total_trade))
+
+# max limit for the plot
+max_trade_value <- max(
+  max(1.1*abs(last_year_sector$total_yearly_EXP), na.rm = TRUE),
+  max(1.1*abs(last_year_sector$total_yearly_IMP), na.rm = TRUE)
+)
+# Palette 
+colors_trade <- c(
+  "Export" = "#1E90FF",   
+  "Import" = "#2E8B57"
+)
+
+# Europe last year
+last_year_EU_plot <- ggplot(last_year_sector %>% 
+                                    filter(partner == "UE2020")) +
+  geom_col(aes(x = general_sector, y = total_yearly_EXP, fill = "Export"), 
+           position = "dodge", alpha = 0.8) +
+  geom_col(aes(x = general_sector, y = -total_yearly_IMP, fill = "Import"), 
+           position = "dodge", alpha = 0.8) +
+  # Etichette di valore
+  geom_text(aes(x = general_sector, y = total_yearly_EXP, 
+                label = format_trillion(total_yearly_EXP)),
+            vjust = -0.5, size = 3, color = "#0047AB", fontface = "bold") +
+  geom_text(aes(x = general_sector, y = -total_yearly_IMP, 
+                label = format_trillion(total_yearly_IMP)),
+            vjust = 1.5, size = 3, color = "#2E8B57", fontface = "bold") +
+  scale_fill_manual(values = colors_trade) +
+  labs(
+    title = "Sectoral Trade Intra-EU in 2024",
+    x = "Sector",
+    y = "Trade Value (Trillion EUR)",
+    fill = "Trade Flow"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14)
+  ) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", linewidth = 0.8) +
+  scale_y_continuous(
+    limits = c(-max_trade_value, max_trade_value),
+    labels = format_trillion
+  )
+
+# Grafico per Resto del Mondo - Ultimo Anno
+last_year_world_plot <- ggplot(last_year_sector %>% 
+                                   filter(partner == "Rest_of_the_World")) +
+  geom_col(aes(x = general_sector, y = total_yearly_EXP, fill = "Export"), 
+           position = "dodge", alpha = 0.8) +
+  geom_col(aes(x = general_sector, y = -total_yearly_IMP, fill = "Import"), 
+           position = "dodge", alpha = 0.8) +
+  # Etichette di valore
+  geom_text(aes(x = general_sector, y = total_yearly_EXP, 
+                label = format_trillion(total_yearly_EXP)),
+            vjust = -0.5, size = 3, color = "#0047AB", fontface = "bold") +
+  geom_text(aes(x = general_sector, y = -total_yearly_IMP, 
+                label = format_trillion(total_yearly_IMP)),
+            vjust = 1.5, size = 3, color = "#2E8B57", fontface = "bold") +
+  scale_fill_manual(values = colors_trade) +
+  labs(
+    title = "Sectoral Trade Extra-EU in 2024",
+    x = "Sector",
+    y = "Trade Value (Trillion EUR)",
+    fill = "Trade Flow"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14)
+  ) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", linewidth = 0.8) +
+  scale_y_continuous(
+    limits = c(-max_trade_value, max_trade_value),
+    labels = format_trillion
+  )
+
+# Grafico per Europa - Primo Anno
+first_year_UE_plot <- ggplot(first_year_sector %>% 
+                                    filter(partner == "UE2020")) +
+  geom_col(aes(x = general_sector, y = total_yearly_EXP, fill = "Export"), 
+           position = "dodge", alpha = 0.8) +
+  geom_col(aes(x = general_sector, y = -total_yearly_IMP, fill = "Import"), 
+           position = "dodge", alpha = 0.8) +
+  # Etichette di valore
+  geom_text(aes(x = general_sector, y = total_yearly_EXP, 
+                label = format_trillion(total_yearly_EXP)),
+            vjust = -0.5, size = 3, color = "#0047AB", fontface = "bold") +
+  geom_text(aes(x = general_sector, y = -total_yearly_IMP, 
+                label = format_trillion(total_yearly_IMP)),
+            vjust = 1.5, size = 3, color = "#2E8B57", fontface = "bold") +
+  scale_fill_manual(values = colors_trade) +
+  labs(
+    title = "Sectoral Trade Intra-EU in 2013",
+    x = "Sector",
+    y = "Trade Value (Trillion EUR)",
+    fill = "Trade Flow"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14)
+  ) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", linewidth = 0.8) +
+  scale_y_continuous(
+    limits = c(-max_trade_value, max_trade_value),
+    labels = format_trillion
+  )
+
+# Grafico per Resto del Mondo - Primo Anno
+first_year_world_plot <- ggplot(first_year_sector %>% 
+                                  filter(partner == "Rest_of_the_World")) +
+  geom_col(aes(x = general_sector, y = total_yearly_EXP, fill = "Export"), 
+           position = "dodge", alpha = 0.8) +
+  geom_col(aes(x = general_sector, y = -total_yearly_IMP, fill = "Import"), 
+           position = "dodge", alpha = 0.8) +
+  # Etichette di valore
+  geom_text(aes(x = general_sector, y = total_yearly_EXP, 
+                label = format_trillion(total_yearly_EXP)),
+            vjust = -0.5, size = 3, color = "#0047AB", fontface = "bold") +
+  geom_text(aes(x = general_sector, y = -total_yearly_IMP, 
+                label = format_trillion(total_yearly_IMP)),
+            vjust = 1.5, size = 3, color = "#2E8B57", fontface = "bold") +
+  scale_fill_manual(values = colors_trade) +
+  labs(
+    title = "Sectoral Trade Extra-EU in 2013",
+    x = "Sector",
+    y = "Trade Value (Trillion EUR)",
+    fill = "Trade Flow"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14)
+  ) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid", linewidth = 0.8) +
+  scale_y_continuous(
+    limits = c(-max_trade_value, max_trade_value),
+    labels = format_trillion
+  )
+
+# Mostra i grafici
+print(first_year_UE_plot)
+print(last_year_EU_plot)
+print(first_year_world_plot)
+print(last_year_world_plot)
+
+
+
+# Salva i grafici (opzionale)
+ggsave("europa_2013.jpg", first_year_UE_plot, width = 5, height = 5, dpi = 300)
+ggsave("europa_2024.jpg", last_year_EU_plot, width = 5, height = 5, dpi = 300)
+ggsave("extra_ue_2013.jpg", first_year_world_plot, width = 5, height = 5, dpi = 300)
+ggsave("extra_ue_2024.jpg", last_year_world_plot, width = 5, height = 5, dpi = 300)
+
+library(writexl)
+# Esporta first_year_sector
+write_xlsx(first_year_sector, path = "first_year_sector.xlsx")
+
+# Esporta last_year_sector
+write_xlsx(last_year_sector, path = "last_year_sector.xlsx")
+```
+
+```{r 2013-2024}
+# Palette
+colors_trade <- c(
+  "Export" = "#1E90FF",
+  "Import" = "#2E8B57"
+)
+# filter years
+comparison_data <- bind_rows(
+  first_year_sector %>% mutate(year = "2013"),
+  last_year_sector %>% mutate(year = "2024")
+)
+
+# UE2020's plot
+plot_ue_comparison <- comparison_data %>%
+  filter(partner == "UE2020") %>%
+  pivot_longer(
+    cols = c(total_yearly_EXP, total_yearly_IMP),
+    names_to = "trade_type",
+    values_to = "value"
+  ) %>%
+  mutate(
+    trade_type = ifelse(trade_type == "total_yearly_EXP", "Export", "Import"),
+    plot_value = ifelse(trade_type == "Import", -value, value)
+  ) %>%
+  ggplot(aes(x = general_sector, y = plot_value, fill = trade_type)) +
+  geom_col(aes(alpha = year), position = position_dodge(width = 0.8), width = 0.7) +
+  scale_alpha_manual(values = c("2013" = 0.5, "2024" = 1), name = "Year") +
+  scale_fill_manual(values = colors_trade, name = "Trade Flow") +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
+  scale_y_continuous(
+    labels = format_trillion,
+    expand = expansion(mult = 0.15)
+  ) +
+  labs(
+    title = "Sectoral Trade Comparison Intra-EU: 2013 vs 2024",
+    x = "Sector",
+    y = "Trade Value (Trillion EUR)",
+    caption = "Lighter bars = 2013, Darker bars = 2024"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14),
+    plot.caption = element_text(hjust = 0.5, face = "italic", size = 10)
+  ) +
+  guides(
+    fill = guide_legend(order = 1),
+    alpha = guide_legend(order = 2)
+  )
+
+# Rest of the World's plot
+plot_extra_ue_comparison <- comparison_data %>%
+  filter(partner == "Rest_of_the_World") %>%
+  pivot_longer(
+    cols = c(total_yearly_EXP, total_yearly_IMP),
+    names_to = "trade_type",
+    values_to = "value"
+  ) %>%
+  mutate(
+    trade_type = ifelse(trade_type == "total_yearly_EXP", "Export", "Import"),
+    plot_value = ifelse(trade_type == "Import", -value, value)
+  ) %>%
+  ggplot(aes(x = general_sector, y = plot_value, fill = trade_type)) +
+  geom_col(aes(alpha = year), position = position_dodge(width = 0.8), width = 0.7) +
+  scale_alpha_manual(values = c("2013" = 0.5, "2024" = 1), name = "Year") +
+  scale_fill_manual(values = colors_trade, name = "Trade Flow") +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.8) +
+  scale_y_continuous(
+    labels = format_trillion,
+    expand = expansion(mult = 0.15)
+  ) +
+  labs(
+    title = "Sectoral Trade Comparison Extra-EU: 2013 vs 2024",
+    x = "Sector",
+    y = "Trade Value (Trillion EUR)",
+    caption = "Lighter bars = 2013, Darker bars = 2024"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    plot.title = element_text(face = "bold", hjust = 0.5, size = 14),
+    plot.caption = element_text(hjust = 0.5, face = "italic", size = 10)
+  ) +
+  guides(
+    fill = guide_legend(order = 1),
+    alpha = guide_legend(order = 2)
+  )
+
+print(plot_ue_comparison)
+print(plot_extra_ue_comparison)
+
+ggsave("ue_comparison_2013_2024.jpg", plot_ue_comparison, width = 6, height = 6, dpi = 300)
+ggsave("extra_ue_comparison_2013_2024.jpg", plot_extra_ue_comparison, width = 6, height = 6, dpi = 300)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+
+# --- 1. Format function ---
+format_value_label <- function(x) {
+  case_when(
+    x >= 1e6 ~ paste0(round(x / 1e6, 2), " T"),
+    x >= 1e3 ~ paste0(round(x / 1e3, 1), " B"),
+    TRUE     ~ paste0(round(x, 0), " M")
+  )
+}
+
+# --- 2. Colors palette ---
+colors_export_sectors_custom <- c(
+  "Services" = "#094782",
+  "ICT & Financial Services" = "#0b72d7",
+  "Transport & Logistics" = "#098bf5",
+  "Health, Education & Culture" = "#54b5fb",
+  "Construction" = "#71c0a7",
+  "Mining & Energy" = "#54AAAA",
+  "Agriculture" = "#478AAA",
+  "Textile & Footwear" = "#325462",
+  "Public Administration" = "#6b91b4"
+)
+
+# --- 3. Plot function ---
+create_sector_comparison_plot <- function(df, flow_col, flow_name, color_palette) {
+  
+  df_filtered <- df %>%
+    filter(partner == "UE2020", year %in% c(2013, 2024)) %>%
+    select(year, general_sector, value = !!sym(flow_col)) 
+  
+  df_stats <- df_filtered %>%
+    arrange(general_sector, year) %>%
+    group_by(general_sector) %>%
+    summarise(
+      val_2013 = first(value),
+      val_2024 = last(value),
+      pct_change = ((val_2024 - val_2013) / val_2013) * 100,
+      label_pct = paste0(ifelse(pct_change >= 0, "+", ""), round(pct_change, 1), "%")
+    ) %>%
+    ungroup() %>%
+    arrange(desc(pct_change)) 
+  ordered_levels <- df_stats$general_sector
+  
+  plot_data <- df_filtered %>%
+    left_join(df_stats, by = "general_sector") %>%
+    mutate(
+      general_sector = factor(general_sector, levels = ordered_levels),
+      year = factor(year, levels = c("2024", "2013")) 
+    )
+
+  max_val <- max(plot_data$value, na.rm = TRUE)
+  expand_limit <- max_val * 1.45 
+  ggplot(plot_data, aes(y = year, x = value, fill = general_sector)) +
+    facet_grid(general_sector ~ ., switch = "y", space = "free_y", scales = "free_y") +
+    
+    geom_col(
+      aes(alpha = year), 
+      width = 0.8,
+      color = NA,
+      show.legend = FALSE
+    ) +
+    
+    geom_text(
+      aes(label = format_value_label(value)),
+      hjust = -0.1, 
+      size = 3.5,
+      fontface = "bold",
+      color = "gray30"
+    ) +
+    
+    geom_text(
+      data = plot_data %>% filter(year == "2024"), 
+      aes(label = label_pct, x = max_val * 1.3),
+      inherit.aes = TRUE,
+      hjust = 1,
+      size = 4,
+      fontface = "bold",
+      color = "black"
+    ) +
+    
+    scale_fill_manual(values = color_palette) +
+    scale_alpha_manual(values = c("2013" = 0.4, "2024" = 1)) +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.05)), limits = c(0, expand_limit)) +
+    
+    labs(
+      title = paste0("Sector Evolution: ", flow_name),
+      subtitle = "Ordered by % Growth (Highest to Lowest) | 2013 (Top) vs 2024 (Bottom)",
+      x = NULL,
+      y = NULL
+    ) +
+    
+    theme_minimal() +
+    theme(
+      text = element_text(family = "sans", color = "#222222"),
+      plot.title = element_text(face = "bold", size = 16, hjust = 0),
+      plot.subtitle = element_text(size = 11, color = "gray50", margin = margin(b = 20)),
+      strip.placement = "outside",          
+      strip.background = element_blank(),   
+      strip.text.y.left = element_text(     
+        angle = 0,                          
+        face = "bold", 
+        size = 11, 
+        hjust = 1                           
+      ),
+      axis.text.y = element_text(size = 10, color = "gray40", face = "bold"), 
+      axis.text.x = element_blank(),        
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x = element_line(color = "gray90", linetype = "dotted"),
+      panel.spacing = unit(0.2, "lines"),   
+      plot.margin = margin(20, 20, 20, 20)
+    )
+}
+
+p_sect_exp <- create_sector_comparison_plot(
+  sector_trade_summary, 
+  "total_yearly_EXP", 
+  "Export (UE2020)", 
+  colors_export_sectors_custom
+)
+
+p_sect_imp <- create_sector_comparison_plot(
+  sector_trade_summary, 
+  "total_yearly_IMP", 
+  "Import (UE2020)", 
+  colors_export_sectors_custom
+)
+
+print(p_sect_exp)
+print(p_sect_imp)
+
+ggsave("ue_sector_export_sorted_growth.jpg", p_sect_exp, width = 9, height = 8, dpi = 300)
+ggsave("ue_sector_import_sorted_growth.jpg", p_sect_imp, width = 9, height = 8, dpi = 300)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales) 
+library(ggrepel)
+
+# --- PREPARAZIONE DATI (stesso codice di prima) ---
+ue_export_data <- sector_trade_summary %>%
+  filter(partner == "UE2020") %>%
+  select(year, general_sector, Total = total_yearly_EXP) %>%
+  arrange(general_sector, year)
+
+df_with_growth <- ue_export_data %>%
+  group_by(general_sector) %>%
+  arrange(year) %>% 
+  mutate(
+    first_value = first(Total),
+    last_value = last(Total),
+    pct_change = ((last_value - first_value) / first_value) * 100
+  ) %>%
+  ungroup()
+
+label_data <- df_with_growth %>%
+  group_by(general_sector) %>%
+  slice_tail(n = 1) %>%
+  mutate(
+    label = paste0(ifelse(pct_change >= 0, "+", ""), round(pct_change, 1), "%"),
+    label_x = year,
+    label_y = Total
+  ) %>%
+  ungroup()
+
+# --- PALETTE COLORI ---
+colors_export_sectors_custom <- c(
+  "Services" = "#094782",
+  "ICT & Financial Services" = "#0b72d7",
+  "Transport & Logistics" = "#098bf5",
+  "Health, Education & Culture" = "#54b5fb",
+  "Construction" = "#71c0a7",
+  "Mining & Energy" = "#57b956",
+  "Agriculture" = "#478f48",
+  "Textile & Footwear" = "#326633",
+  "Public Administration" = "#6b91b4"
+)
+
+# --- FUNZIONE DI FORMATTAZIONE ---
+format_trillion <- function(x) {
+  case_when(
+    x >= 1e12 ~ paste0(round(x/1e12, 1), "W"),
+    x >= 1e9 ~ paste0(round(x/1e9, 1), "W"),
+    x >= 1e6 ~ paste0(round(x/1e6, 1), "T"),
+    x >= 1e3 ~ paste0(round(x/1e3, 1), "B"),
+    TRUE ~ as.character(round(x, 0))
+  )
+}
+
+# ========================================
+# PLOT EXPORT - LINEAR
+# ========================================
+plot_ue_export_linear <- ggplot(df_with_growth, aes(x = year, y = Total, group = general_sector)) +
+  geom_line(linewidth = 1.2, aes(color = general_sector)) +
+  geom_point(size = 3, alpha = 0.7, aes(color = general_sector)) +
+  geom_text_repel(
+    data = label_data,
+    aes(label = label, x = label_x, y = label_y, color = general_sector),
+    size = 3.5, 
+    fontface = "bold", 
+    show.legend = FALSE,
+    nudge_x = 0.8, 
+    direction = "y",
+    box.padding = unit(0.5, "lines"),
+    point.padding = unit(0.5, "lines"),
+    force = 1.5
+  ) +
+  scale_y_continuous(
+    labels = format_trillion,
+    expand = expansion(mult = c(0.05, 0.25))
+  ) +
+  scale_color_manual(values = colors_export_sectors_custom) + 
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linetype = "dotted", color = "lightgray"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.margin = margin(10, 5, 10, 5)
+  ) +
+  labs(
+    title = "Sector Evolution - Export - UE2020 (Linear Scale)",
+    x = "Year",
+    y = "Trade Value (Trillion EUR)",
+    color = "Sector"
+  )
+
+# ========================================
+# PLOT EXPORT - LOGARITMIC
+# ========================================
+plot_ue_export_log <- ggplot(df_with_growth, aes(x = year, y = Total, group = general_sector)) +
+  geom_line(linewidth = 1.2, aes(color = general_sector)) +
+  geom_point(size = 3, alpha = 0.7, aes(color = general_sector)) +
+  geom_text_repel(
+    data = label_data,
+    aes(label = label, x = label_x, y = label_y, color = general_sector),
+    size = 3.5, 
+    fontface = "bold", 
+    show.legend = FALSE,
+    nudge_x = 0.8, 
+    direction = "y",
+    box.padding = unit(0.5, "lines"),
+    point.padding = unit(0.5, "lines"),
+    force = 1.5
+  ) +
+  scale_y_log10(
+    labels = format_trillion,
+    expand = expansion(mult = c(0.05, 0.25)),
+    breaks = scales::trans_breaks("log10", function(x) 10^x)
+  ) +
+  annotation_logticks(sides = "l") +
+  scale_color_manual(values = colors_export_sectors_custom) + 
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linetype = "dotted", color = "lightgray"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.margin = margin(10, 5, 10, 5)
+  ) +
+  labs(
+    title = "Sector Evolution - Export - UE2020 (Log Scale)",
+    x = "Year",
+    y = "Trade Value (Trillion EUR) - Log Scale",
+    color = "Sector"
+  )
+
+# ========================================
+# PLOT IMPORT - LINEAR
+# ========================================
+ue_import_data <- sector_trade_summary %>%
+  filter(partner == "UE2020") %>%
+  select(year, general_sector, Total = total_yearly_IMP) %>%
+  arrange(general_sector, year)
+
+df_with_growth_import <- ue_import_data %>%
+  group_by(general_sector) %>%
+  arrange(year) %>% 
+  mutate(
+    first_value = first(Total),
+    last_value = last(Total),
+    pct_change = ((last_value - first_value) / first_value) * 100
+  ) %>%
+  ungroup()
+
+label_data_import <- df_with_growth_import %>%
+  group_by(general_sector) %>%
+  slice_tail(n = 1) %>%
+  mutate(
+    label = paste0(ifelse(pct_change >= 0, "+", ""), round(pct_change, 1), "%"),
+    label_x = year,
+    label_y = Total
+  ) %>%
+  ungroup()
+
+plot_ue_import_linear <- ggplot(df_with_growth_import, aes(x = year, y = Total, group = general_sector)) +
+  geom_line(linewidth = 1.2, aes(color = general_sector)) +
+  geom_point(size = 3, alpha = 0.7, aes(color = general_sector)) +
+  geom_text_repel(
+    data = label_data_import,
+    aes(label = label, x = label_x, y = label_y, color = general_sector),
+    size = 3.5, 
+    fontface = "bold", 
+    show.legend = FALSE,
+    nudge_x = 0.7, 
+    direction = "y",
+    box.padding = unit(0.5, "lines"),
+    point.padding = unit(0.5, "lines"),
+    force = 2
+  ) +
+  scale_y_continuous(
+    labels = format_trillion,
+    expand = expansion(mult = c(0.05, 0.25))
+  ) +
+  scale_color_manual(values = colors_export_sectors_custom) + 
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linetype = "dotted", color = "lightgray"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.margin = margin(10, 5, 10, 5)
+  ) +
+  labs(
+    title = "Sector Evolution - Import - UE2020 (Linear Scale)",
+    x = "Year",
+    y = "Trade Value (Trillion EUR)",
+    color = "Sector"
+  )
+
+# ========================================
+# plot IMPORT - LOGARITMIC
+# ========================================
+plot_ue_import_log <- ggplot(df_with_growth_import, aes(x = year, y = Total, group = general_sector)) +
+  geom_line(linewidth = 1.2, aes(color = general_sector)) +
+  geom_point(size = 3, alpha = 0.7, aes(color = general_sector)) +
+  geom_text_repel(
+    data = label_data_import,
+    aes(label = label, x = label_x, y = label_y, color = general_sector),
+    size = 3.5, 
+    fontface = "bold", 
+    show.legend = FALSE,
+    nudge_x = 0.7, 
+    direction = "y",
+    box.padding = unit(0.5, "lines"),
+    point.padding = unit(0.5, "lines"),
+    force = 2
+  ) +
+  scale_y_log10(
+    labels = format_trillion,
+    expand = expansion(mult = c(0.05, 0.25)),
+    breaks = scales::trans_breaks("log10", function(x) 10^x)
+  ) +
+  annotation_logticks(sides = "l") +
+  scale_color_manual(values = colors_export_sectors_custom) + 
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linetype = "dotted", color = "lightgray"),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.margin = margin(10, 5, 10, 5)
+  ) +
+  labs(
+    title = "Sector Evolution - Import - UE2020 (Log Scale)",
+    x = "Year",
+    y = "Trade Value (Trillion EUR) - Log Scale",
+    color = "Sector"
+  )
+
+print(plot_ue_export_linear)
+print(plot_ue_export_log)
+print(plot_ue_import_linear)
+print(plot_ue_import_log)
+
+ggsave("ue_export_services_linear.jpg", plot_ue_export_linear, width = 6, height = 6, dpi = 300)
+ggsave("ue_export_services_log.jpg", plot_ue_export_log, width = 6, height = 6, dpi = 300)
+ggsave("ue_import_services_linear.jpg", plot_ue_import_linear, width = 6, height = 6, dpi = 300)
+ggsave("ue_import_services_log.jpg", plot_ue_import_log, width = 6, height = 6, dpi = 300)
+```
+
+```{r MAPPE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(maps)
+library(viridis)
+library(classInt)
+
+# MAPPING FOR THE MAP PLOT
+eu_countries_mapping <- c(
+  "Austria" = "Austria",
+  "Belgium" = "Belgium",
+  "Bulgaria" = "Bulgaria",
+  "Croatia" = "Croatia",
+  "Cyprus" = "Cyprus",
+  "Czech Rep." = "Czech Republic",
+  "Denmark" = "Denmark",
+  "Estonia" = "Estonia",
+  "Finland" = "Finland",
+  "France" = "France",
+  "Germany" = "Germany",
+  "Greece" = "Greece",
+  "Hungary" = "Hungary",
+  "Ireland" = "Ireland",
+  "Italy" = "Italy",
+  "Latvia" = "Latvia",
+  "Lithuania" = "Lithuania",
+  "Luxembourg" = "Luxembourg",
+  "Malta" = "Malta",
+  "Netherlands" = "Netherlands",
+  "Poland" = "Poland",
+  "Portugal" = "Portugal",
+  "Romania" = "Romania",
+  "Slovakia" = "Slovakia",
+  "Slovenia" = "Slovenia",
+  "Spain" = "Spain",
+  "Sweden" = "Sweden"
+)
+
+# DATA PREPARATION FUNCTION
+prepare_trade_data <- function(df, flow_type) {
+  df %>%
+    filter(stk_flow == flow_type, partner == "UE2020", State != "EU27_2020") %>%
+    group_by(State) %>%
+    summarise(
+      value_2013 = sum(as.numeric(`2013`), na.rm = TRUE),
+      value_2024 = sum(as.numeric(`2024`), na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      change = value_2024 - value_2013,
+      pct_change = ((value_2024 - value_2013) / value_2013) * 100
+    )
+}
+
+export_data <- prepare_trade_data(df_wide, "EXP")
+import_data <- prepare_trade_data(df_wide, "IMP")
+world_map <- map_data("world")
+europe_map_full <- world_map %>%
+  filter(long >= -14 & long <= 36 & lat >= 36 & lat <= 74)
+europe_map_eu <- world_map %>%
+  filter(region %in% eu_countries_mapping)
+
+# Natural Breaks (Jenks) fot the best chunks
+all_values <- c(export_data$value_2013, export_data$value_2024,
+                import_data$value_2013, import_data$value_2024)
+all_values_clean <- all_values[all_values > 0 & !is.na(all_values)]
+breaks <- classIntervals(all_values_clean, n = 5, style = "jenks")$brks
+
+# FORMAT BREAK
+format_break <- function(x) {
+  sapply(x, function(val) {
+    if (val >= 1e9) {
+      paste0(round(val/1e9, 1), "W")
+    } else if (val >= 1e6) {
+      paste0(round(val/1e6, 0), "T")
+    } else if (val >= 1e3) {
+      paste0(round(val/1e3, 0), "B")
+    } else {
+      as.character(round(val, 0))
+    }
+  })
+}
+
+# Categories tags
+category_labels <- paste0(
+  format_break(breaks[-length(breaks)]), " - ", 
+  format_break(breaks[-1])
+)
+
+assign_category <- function(value) {
+  if (is.na(value) || value == 0) return(NA)
+  category <- cut(value, breaks = breaks, labels = category_labels, include.lowest = TRUE)
+  return(as.character(category))
+}
+
+export_data <- export_data %>%
+  mutate(
+    cat_2013 = sapply(value_2013, assign_category),
+    cat_2024 = sapply(value_2024, assign_category)
+  )
+
+import_data <- import_data %>%
+  mutate(
+    cat_2013 = sapply(value_2013, assign_category),
+    cat_2024 = sapply(value_2024, assign_category)
+  )
+
+# map function
+prepare_map_data <- function(trade_data, cat_col) {
+  state_to_region <- data.frame(
+    State = names(eu_countries_mapping),
+    region = as.character(eu_countries_mapping),
+    stringsAsFactors = FALSE
+  )
+  
+  # Merge trade data with mapping
+  trade_mapped <- trade_data %>%
+    left_join(state_to_region, by = "State") %>%
+    select(State, region, category = all_of(cat_col))
+  
+  # Merge with map
+  map_data <- europe_map_eu %>%
+    left_join(trade_mapped, by = "region")
+  
+  return(map_data)
+}
+
+export_2013_map <- prepare_map_data(export_data, "cat_2013")
+export_2024_map <- prepare_map_data(export_data, "cat_2024")
+import_2013_map <- prepare_map_data(import_data, "cat_2013")
+import_2024_map <- prepare_map_data(import_data, "cat_2024")
+
+# Common theme
+map_theme <- theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 18, margin = margin(t = 5, b = 10)),
+    legend.position = "right",
+    legend.direction = "vertical",
+    legend.title = element_text(face = "bold", size = 13),
+    legend.text = element_text(size = 11),
+    legend.key.width = unit(1, "cm"),
+    legend.key.height = unit(0.8, "cm"),
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    axis.ticks = element_blank(),
+    plot.margin = margin(10, 15, 10, 10)
+  )
+
+
+
+# Color palette
+colors <- colorRampPalette(c("#C3FCFF","#032457"))(length(category_labels))
+category_labels_ordered <- category_labels
+colors_ordered <- setNames(colors, category_labels_ordered)
+
+# Map 1: Export 2013
+p1 <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = export_2013_map, 
+               aes(x = long, y = lat, group = group, fill = category),
+               color = "white", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_manual(
+    values = colors_ordered,
+    name = "Trade Value\n(EUR)",
+    na.value = "grey95",
+    limits = category_labels_ordered,
+    drop = FALSE
+  ) +
+  labs(title = "EU Exports - 2013") +
+  map_theme
+
+# Map 2: Export 2024
+p2 <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = export_2024_map, 
+               aes(x = long, y = lat, group = group, fill = category),
+               color = "white", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_manual(
+    values = colors_ordered,
+    name = "Trade Value\n(EUR)",
+    na.value = "grey95",
+    limits = category_labels_ordered,
+    drop = FALSE
+  ) +
+  labs(title = "EU Exports - 2024") +
+  map_theme
+
+# Map 3: Import 2013
+p3 <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = import_2013_map, 
+               aes(x = long, y = lat, group = group, fill = category),
+               color = "white", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_manual(
+    values = colors_ordered,
+    name = "Trade Value\n(EUR)",
+    na.value = "grey95",
+    limits = category_labels_ordered,
+    drop = FALSE
+  ) +
+  labs(title = "EU Imports - 2013") +
+  map_theme
+
+# Map 4: Import 2024
+p4 <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = import_2024_map, 
+               aes(x = long, y = lat, group = group, fill = category),
+               color = "white", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_manual(
+    values = colors_ordered,
+    name = "Trade Value\n(EUR)",
+    na.value = "grey95",
+    limits = category_labels_ordered,
+    drop = FALSE
+  ) +
+  labs(title = "EU Imports - 2024") +
+  map_theme
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
+
+
+ggsave("EU_EXP_2013.jpg", p1, width = 6, height = 6, dpi = 300)
+ggsave("EU_EXP_2024.jpg", p2, width = 6, height = 6, dpi = 300)
+ggsave("EU_IMP_2013.jpg", p3, width = 6, height = 6, dpi = 300)
+ggsave("EU_IMP_2024.jpg", p4, width = 6, height = 6, dpi = 300)
+```
+
+```{r MAPPA_SFOCATURA}
+library(ggplot2)
+library(dplyr)
+library(maps)
+library(viridis)
+
+prepare_trade_data <- function(df, flow_type) {
+  df %>%
+    filter(stk_flow == flow_type, partner == "UE2020", State != "EU27_2020") %>%
+    group_by(State) %>%
+    summarise(
+      value_2013 = sum(as.numeric(`2013`), na.rm = TRUE),
+      value_2024 = sum(as.numeric(`2024`), na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      change = value_2024 - value_2013,
+      pct_change = ((value_2024 - value_2013) / value_2013) * 100
+    )
+}
+
+# Prepare the 2 maps
+export_pct_map <- prepare_map_data_pct(export_data)
+import_pct_map <- prepare_map_data_pct(import_data)
+
+# Find the range
+all_pct_values <- c(export_data$pct_change, import_data$pct_change)
+all_pct_values_clean <- all_pct_values[!is.na(all_pct_values) & is.finite(all_pct_values)]
+
+min_pct <- min(all_pct_values_clean, na.rm = TRUE)
+max_pct <- max(all_pct_values_clean, na.rm = TRUE)
+limits_pct <- c(min_pct, max_pct)
+
+cat("Range variazione percentuale:", round(min_pct, 1), "% to", round(max_pct, 1), "%\n")
+
+# Map 1: Export - %
+p_export_pct <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = export_pct_map, 
+               aes(x = long, y = lat, group = group, fill = pct_change),
+               color = "white", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_gradient2(
+    low = "#d73027",           # Rosso per valori negativi/bassi
+    mid = "#ffffbf",           # Giallo per valori intorno a zero
+    high = "#1a9850",          # Verde per valori positivi/alti
+    midpoint = 0,              # Centro della scala a 0%
+    limits = limits_pct,
+    na.value = "grey95",
+    name = "% Change\n2013-2024",
+    labels = function(x) paste0(ifelse(x >= 0, "+", ""), round(x, 0), "%")
+  ) +
+  labs(title = "EU Exports - % Change 2013-2024") +
+  map_theme
+
+# Map 2: Import - %
+p_import_pct <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = import_pct_map, 
+               aes(x = long, y = lat, group = group, fill = pct_change),
+               color = "white", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_gradient2(
+    low = "#d73027",
+    mid = "#ffffbf",
+    high = "#1a9850",
+    midpoint = 0,
+    limits = limits_pct,
+    na.value = "grey95",
+    name = "% Change\n2013-2024",
+    labels = function(x) paste0(ifelse(x >= 0, "+", ""), round(x, 0), "%")
+  ) +
+  labs(title = "EU Imports - % Change 2013-2024") +
+  map_theme
+
+
+# alternative without <0 values
+if (min_pct >= 0) {
+  p_export_pct_alt <- ggplot() +
+    geom_polygon(data = europe_map_full, 
+                 aes(x = long, y = lat, group = group),
+                 fill = "grey95", color = "grey70", linewidth = 0.2) +
+    geom_polygon(data = export_pct_map, 
+                 aes(x = long, y = lat, group = group, fill = pct_change),
+                 color = "white", linewidth = 0.4) +
+    coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+    scale_fill_gradient(
+      low = "#C3FCFF",          
+      high = "#032457",  
+      limits = limits_pct,
+      na.value = "grey95",
+      name = "% Change\n2013-2024",
+      labels = function(x) paste0("+", round(x, 0), "%")
+    ) +
+    labs(title = "EU Exports - % Change 2013-2024") +
+    map_theme
+  
+  p_import_pct_alt <- ggplot() +
+    geom_polygon(data = europe_map_full, 
+                 aes(x = long, y = lat, group = group),
+                 fill = "grey95", color = "grey70", linewidth = 0.2) +
+    geom_polygon(data = import_pct_map, 
+                 aes(x = long, y = lat, group = group, fill = pct_change),
+                 color = "white", linewidth = 0.4) +
+    coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+    scale_fill_gradient(
+      low = "#C3FCFF",
+      high = "#032457",
+      limits = limits_pct,
+      na.value = "grey95",
+      name = "% Change\n2013-2024",
+      labels = function(x) paste0("+", round(x, 0), "%")
+    ) +
+    labs(title = "EU Imports - % Change 2013-2024") +
+    map_theme
+}
+
+print(p_export_pct)
+print(p_import_pct)
+if (exists("p_export_pct_alt")) {
+  print(p_export_pct_alt)
+  print(p_import_pct_alt)
+}
+
+ggsave("EU_EXP_PctChange_2013_2024_continuous.jpg", p_export_pct, width = 6, height = 6, dpi = 300)
+ggsave("EU_IMP_PctChange_2013_2024_continuous.jpg", p_import_pct, width = 6, height = 6, dpi = 300)
+
+if (exists("p_export_pct_alt")) {
+  ggsave("EU_EXP_PctChange_2013_2024_gradient.jpg", p_export_pct_alt, width = 6, height = 6, dpi = 300)
+  ggsave("EU_IMP_PctChange_2013_2024_gradient.jpg", p_import_pct_alt, width = 6, height = 6, dpi = 300)
+}
+```
+
+```{r MAPPA_CLASSI_PERCENTUALI}
+library(ggplot2)
+library(dplyr)
+library(maps)
+
+# Funzione per preparare dati di trade (export o import)
+prepare_trade_data <- function(df, flow_type) {
+  df %>%
+    filter(stk_flow == flow_type, partner == "UE2020", State != "EU27_2020") %>%
+    group_by(State) %>%
+    summarise(
+      value_2013 = sum(as.numeric(`2013`), na.rm = TRUE),
+      value_2024 = sum(as.numeric(`2024`), na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      change = value_2024 - value_2013,
+      pct_change = ((value_2024 - value_2013) / value_2013) * 100
+    )
+}
+
+# Preparazione dati per Export e Import
+export_data <- prepare_trade_data(df_wide, "EXP")
+import_data <- prepare_trade_data(df_wide, "IMP")
+
+# Carica mappa mondo completa
+world_map <- map_data("world")
+
+# Mappa Europa completa (tutti i paesi)
+europe_map_full <- world_map %>%
+  filter(long >= -14 & long <= 36 & lat >= 36 & lat <= 74)
+
+# Solo paesi EU per i dati
+europe_map_eu <- world_map %>%
+  filter(region %in% eu_countries_mapping)
+
+
+# Verifica il range dei dati
+all_pct_values <- c(export_data$pct_change, import_data$pct_change)
+all_pct_values_clean <- all_pct_values[!is.na(all_pct_values) & is.finite(all_pct_values)]
+
+min_pct <- min(all_pct_values_clean, na.rm = TRUE)
+max_pct <- max(all_pct_values_clean, na.rm = TRUE)
+
+cat("Range variazione percentuale:", round(min_pct, 1), "% to", round(max_pct, 1), "%\n")
+
+# Definisci breaks "tondi" basati sul range dei tuoi dati
+# Esempio: 0-50, 50-100, 100-150, 150-200, 200-250
+# Adatta questi valori in base al tuo range effettivo
+
+# Opzione 1: Se i valori vanno da 0 a ~250%
+breaks_pct <- c(0, 50, 100, 150, 200, 250, 300)
+
+# Opzione 2: Se hai valori negativi
+# breaks_pct <- c(-50, 0, 50, 100, 150, 200, 250)
+
+# Filtra i breaks per includere solo quelli rilevanti per i tuoi dati
+breaks_pct <- breaks_pct[breaks_pct >= floor(min_pct/50)*50 & breaks_pct <= ceiling(max_pct/50)*50]
+if (breaks_pct[1] > min_pct) breaks_pct <- c(floor(min_pct/50)*50, breaks_pct)
+if (breaks_pct[length(breaks_pct)] < max_pct) breaks_pct <- c(breaks_pct, ceiling(max_pct/50)*50)
+
+# Crea etichette leggibili
+category_labels_pct <- paste0(breaks_pct[-length(breaks_pct)], "% - ", breaks_pct[-1], "%")
+
+cat("\nCategorie create:\n")
+for(i in 1:length(category_labels_pct)) {
+  cat(i, ":", category_labels_pct[i], "\n")
+}
+
+# Funzione per assegnare categoria
+assign_pct_category <- function(value) {
+  if (is.na(value) || !is.finite(value)) return(NA)
+  category <- cut(value, breaks = breaks_pct, labels = category_labels_pct, include.lowest = TRUE)
+  return(as.character(category))
+}
+
+# Aggiungi categorie ai dati
+export_data <- export_data %>%
+  mutate(pct_cat = sapply(pct_change, assign_pct_category))
+
+import_data <- import_data %>%
+  mutate(pct_cat = sapply(pct_change, assign_pct_category))
+
+# ========================================
+# PREPARAZIONE DATI MAPPA
+# ========================================
+
+prepare_map_data_pct <- function(trade_data) {
+  state_to_region <- data.frame(
+    State = names(eu_countries_mapping),
+    region = as.character(eu_countries_mapping),
+    stringsAsFactors = FALSE
+  )
+  
+  trade_mapped <- trade_data %>%
+    left_join(state_to_region, by = "State") %>%
+    select(State, region, pct_change, pct_cat)
+  
+  map_data <- europe_map_eu %>%
+    left_join(trade_mapped, by = "region")
+  
+  return(map_data)
+}
+
+export_pct_map <- prepare_map_data_pct(export_data)
+import_pct_map <- prepare_map_data_pct(import_data)
+
+# ========================================
+# TEMA E PALETTE
+# ========================================
+
+map_theme <- theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 1, size = 18, 
+                              margin = margin(t = 5, b = 5), color = "white"),
+    legend.position = "left",
+    legend.direction = "vertical",
+    legend.title = element_text(face = "bold", size = 13, color = "white"),
+    legend.text = element_text(size = 11, color = "white"),
+    legend.key.width = unit(1, "cm"),
+    legend.key.height = unit(0.8, "cm"),
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    axis.ticks = element_blank(),
+    plot.margin = margin(10, 15, 10, 10),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(fill = "transparent", color = NA),
+    legend.box.background = element_rect(fill = "transparent", color = NA)
+  )
+
+#PALETTE
+colors_pct <- colorRampPalette(c("#C3FCFF", "#4A90E2", "#032457"))(length(category_labels_pct))
+colors_pct_ordered <- setNames(colors_pct, category_labels_pct)
+
+# ========================================
+# CREATE THE MAP
+# ========================================
+
+p_export_pct <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = export_pct_map, 
+               aes(x = long, y = lat, group = group, fill = pct_cat),
+               color = "black", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_manual(
+    values = colors_pct_ordered,
+    name = "% Change\n2013-2024",
+    na.value = "grey95",
+    limits = category_labels_pct,
+    drop = FALSE
+  ) +
+  labs(title = "EU Exports - % Change 2013-2024") +
+  map_theme
+
+p_import_pct <- ggplot() +
+  geom_polygon(data = europe_map_full, 
+               aes(x = long, y = lat, group = group),
+               fill = "grey95", color = "grey70", linewidth = 0.2) +
+  geom_polygon(data = import_pct_map, 
+               aes(x = long, y = lat, group = group, fill = pct_cat),
+               color = "black", linewidth = 0.4) +
+  coord_fixed(1.3, xlim = c(-12, 32), ylim = c(36, 71)) +
+  scale_fill_manual(
+    values = colors_pct_ordered,
+    name = "% Change\n2013-2024",
+    na.value = "grey95",
+    limits = category_labels_pct,
+    drop = FALSE
+  ) +
+  labs(title = "EU Imports - % Change 2013-2024") +
+  map_theme
+
+print(p_export_pct)
+print(p_import_pct)
+
+ggsave("EU_EXP_PctChange_2013_2024.png", p_export_pct, width = 6, height = 6, dpi = 300)
+ggsave("EU_IMP_PctChange_2013_2024.png", p_import_pct, width = 6, height = 6, dpi = 300)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggrepel)
+library(scales)
+
+# --- 1. DATA PREPARATION ---
+bubble_df <- sector_trade_summary %>%
+  filter(year %in% c(2013, 2024),
+         partner %in% c("UE2020")) %>%
+  group_by(general_sector, year) %>%
+  summarise(total_EXP = sum(total_yearly_EXP), .groups = "drop") %>%
+  pivot_wider(names_from = year, values_from = total_EXP) %>%
+  mutate(
+    GrowthPerc = ((`2024` - `2013`) / `2013`) * 100,
+    Value2024 = `2024`,
+    Value2024_T = `2024` / 1e6  # Converti in Trilioni
+  )
+
+min_growth <- min(bubble_df$GrowthPerc, na.rm = TRUE)
+max_growth <- max(bubble_df$GrowthPerc, na.rm = TRUE)
+
+# Stampa statistiche per capire la distribuzione
+cat("=== DISTRIBUZIONE VALORI ===\n")
+print(bubble_df %>% arrange(desc(Value2024_T)) %>% select(general_sector, Value2024_T, GrowthPerc))
+cat("\nMin:", round(min(bubble_df$Value2024_T), 2), "T\n")
+cat("Max:", round(max(bubble_df$Value2024_T), 2), "T\n")
+cat("Median:", round(median(bubble_df$Value2024_T), 2), "T\n")
+
+# --- 2. BUBBLE PLOT CON SCALA LINEARE OTTIMIZZATA ---
+p <- ggplot(bubble_df, aes(x = Value2024_T, y = GrowthPerc, 
+                            size = Value2024_T, 
+                            fill = GrowthPerc,
+                            label = general_sector)) +
+  
+  geom_point(alpha = 0.7, shape = 21, color = "white", stroke = 1.5, show.legend = FALSE) +
+  
+  # Etichette con dimensione fissa e anti-sovrapposizione
+  geom_text_repel(
+    size = 3.5,
+    fontface = "bold",
+    color = "black",
+    bg.color = "white",
+    bg.r = 0.15,
+    box.padding = 0.8,
+    point.padding = 0.5,
+    segment.color = "grey50",
+    segment.size = 0.5,
+    max.overlaps = 30,
+    force = 3,
+    force_pull = 0.5,
+    show.legend = FALSE
+  ) +
+  
+  # Scala X in Trilioni
+  scale_x_continuous(
+    labels = function(x) paste0(round(x, 2), "T"),
+    expand = expansion(mult = c(0.15, 0.2))
+  ) +
+  
+  # Scala Y con segno percentuale
+  scale_y_continuous(
+    labels = function(x) paste0(ifelse(x >= 0, "+", ""), round(x, 1), "%"),
+    expand = expansion(mult = c(0.15, 0.2))
+  ) +
+  
+  # SCALA LINEARE con range REALMENTE proporzionale
+  # Se min = 0.5T e max = 6T, il rapporto è 12:1
+  # Quindi se la bolla piccola è 4, la grande deve essere 48
+  scale_size_area(
+    max_size = 40,  # Massima dimensione della bolla
+    labels = function(x) paste0(round(x, 2), "T"),
+    name = "Export Value 2024"
+  ) +
+  
+  # Palette blu-azzurro (gradiente basato su crescita)
+  scale_fill_gradient(
+    low = "#C3FCFF",
+    high = "#032457",
+    labels = function(x) paste0(ifelse(x >= 0, "+", ""), round(x, 1), "%"),
+    name = "Growth %\n2013-2024"
+  ) +
+  
+  # Etichette assi e titolo
+  labs(
+    title = "Sector Momentum: Growth vs Market Size",
+    subtitle = "Export Analysis 2013-2024 intra UE",
+    x = "Export Value in 2024 (Trillion EUR)",
+    y = "Growth % (2013-2024)"
+  ) +
+  
+  # Tema pulito e professionale
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey40"),
+    axis.title = element_text(face = "bold", size = 13),
+    axis.text = element_text(size = 11),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+    legend.position = "none",
+    plot.margin = margin(15, 20, 15, 15),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA)
+  )
+
+print(p)
+
+# --- 3. SALVATAGGIO ---
+ggsave("sector_momentum_bubble_chart.png", p, 
+       width = 8, height = 8, dpi = 300, bg = "white")
+ggsave("sector_momentum_bubble_chart.jpg", p, 
+       width = 8, height = 8, dpi = 300, bg = "white")
+
+```
