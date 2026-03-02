@@ -1,4 +1,4 @@
-# Data Visualization Project
+# The European trade’s silent transformation
 ---
 This project explores how the structure of European trade has evolved between 2013 and 2024, going beyond simple growth figures to uncover deeper structural changes.
 
